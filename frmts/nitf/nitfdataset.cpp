@@ -4020,7 +4020,16 @@ static char **NITFJP2OPENJPEGOptions(GDALDriver *poJ2KDriver,
     for (int i = 0; papszOptions != nullptr && papszOptions[i] != nullptr; i++)
     {
         if (STARTS_WITH_CI(papszOptions[i], "BLOCKXSIZE=") ||
-            STARTS_WITH_CI(papszOptions[i], "BLOCKYSIZE="))
+            STARTS_WITH_CI(papszOptions[i], "BLOCKYSIZE=") ||
+            STARTS_WITH_CI(papszOptions[i], "BLOCKSIZE_STRICT=") ||
+            STARTS_WITH_CI(papszOptions[i], "@BLOCKSIZE_STRICT=") ||
+            STARTS_WITH_CI(papszOptions[i], "RESOLUTIONS=") ||
+            STARTS_WITH_CI(papszOptions[i], "PRECINCTS=") ||
+            STARTS_WITH_CI(papszOptions[i], "REVERSIBLE=") ||
+            STARTS_WITH_CI(papszOptions[i], "PROGRESSION=") ||
+            STARTS_WITH_CI(papszOptions[i], "YCC=") ||
+            STARTS_WITH_CI(papszOptions[i], "PLT=") ||
+            STARTS_WITH_CI(papszOptions[i], "TLM="))
         {
             papszJP2Options = CSLAddString(papszJP2Options, papszOptions[i]);
         }
@@ -4034,7 +4043,7 @@ static char **NITFJP2OPENJPEGOptions(GDALDriver *poJ2KDriver,
     }
 
     const char *pszProfile = CSLFetchNameValueDef(papszOptions, "PROFILE", "");
-    if (STARTS_WITH_CI(pszProfile, "NPJE"))
+    if (STARTS_WITH_CI(pszProfile, "NPJE") || STARTS_WITH_CI(pszProfile, "EPJE"))
     {
         // Follow STDI-0006 NCDRD "2.3 Data Compression - JPEG 2000" and
         // ISO/IEC BIIF Profile BPJ2K01.10
@@ -4060,7 +4069,7 @@ static char **NITFJP2OPENJPEGOptions(GDALDriver *poJ2KDriver,
         std::vector<double> adfBPP = {
             0.03125, 0.0625, 0.125, 0.25, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0,
             1.1,     1.2,    1.3,   1.5,  1.7, 2.0, 2.3, 3.5, 3.9};
-        if (STARTS_WITH_CI(pszProfile, "NPJE_NUMERICALLY_LOSSLESS"))
+        if (STARTS_WITH_CI(pszProfile, "NPJE_NUMERICALLY_LOSSLESS") || STARTS_WITH_CI(pszProfile, "EPJE"))
         {
             // given that we consider a compression ratio afterwards, we
             // arbitrarily consider a Byte datatype, and thus lossless quality
@@ -4089,7 +4098,15 @@ static char **NITFJP2OPENJPEGOptions(GDALDriver *poJ2KDriver,
         papszJP2Options =
             CSLSetNameValue(papszJP2Options, "QUALITY", osQuality.c_str());
 
-        papszJP2Options = CSLAddString(papszJP2Options, "PROGRESSION=LRCP");
+        if (STARTS_WITH_CI(pszProfile, "EPJE"))
+        {
+            papszJP2Options = CSLAddString(papszJP2Options, "PROGRESSION=RLCP");    
+        }
+        else
+        {
+            papszJP2Options = CSLAddString(papszJP2Options, "PROGRESSION=LRCP");
+        }
+        
 
         // Disable MCT
         papszJP2Options = CSLAddString(papszJP2Options, "YCC=NO");
@@ -5060,9 +5077,12 @@ GDALDataset *NITFDataset::NITFCreateCopy(const char *pszFilename,
     if (poJ2KDriver != nullptr &&
         EQUAL(poJ2KDriver->GetDescription(), "JP2ECW"))
     {
-        if (STARTS_WITH_CI(
+        if ((STARTS_WITH_CI(
                 CSLFetchNameValueDef(papszFullOptions, "PROFILE", "NPJE"),
-                "NPJE") &&
+                "NPJE") || 
+                STARTS_WITH_CI(
+                CSLFetchNameValueDef(papszFullOptions, "PROFILE", "EPJE"),
+                "EPJE")) &&
             (nXSize >= 1024 || nYSize >= 1024))
         {
             int nBlockXSize =
@@ -5094,17 +5114,22 @@ GDALDataset *NITFDataset::NITFCreateCopy(const char *pszFilename,
     else if (poJ2KDriver != nullptr &&
              EQUAL(poJ2KDriver->GetDescription(), "JP2OPENJPEG"))
     {
-        const char *pszProfile = CSLFetchNameValue(papszFullOptions, "PROFILE");
-        if (pszProfile && EQUAL(pszProfile, "EPJE"))
-        {
-            CPLError(CE_Warning, CPLE_AppDefined,
-                     "PROFILE=EPJE not handled by JP2OPENJPEG driver");
-        }
 
         int nBlockXSize =
             atoi(CSLFetchNameValueDef(papszFullOptions, "BLOCKXSIZE", "0"));
         int nBlockYSize =
             atoi(CSLFetchNameValueDef(papszFullOptions, "BLOCKYSIZE", "0"));
+
+        const char *pszProfile = CSLFetchNameValue(papszFullOptions, "PROFILE");
+
+        if (pszProfile && STARTS_WITH_CI(pszProfile, "EPJE") &&
+            ((nBlockXSize != 0 && nBlockXSize != 1024) ||
+             (nBlockYSize != 0 && nBlockYSize != 1024)))
+        {
+            CPLError(CE_Warning, CPLE_AppDefined,
+                     "PROFILE=EPJE implies 1024x1024 tiles");
+        }
+
         if (pszProfile && STARTS_WITH_CI(pszProfile, "NPJE") &&
             ((nBlockXSize != 0 && nBlockXSize != 1024) ||
              (nBlockYSize != 0 && nBlockYSize != 1024)))
@@ -5114,7 +5139,8 @@ GDALDataset *NITFDataset::NITFCreateCopy(const char *pszFilename,
         }
 
         if (nXSize >= 1024 || nYSize >= 1024 ||
-            (pszProfile && STARTS_WITH_CI(pszProfile, "NPJE")))
+            (pszProfile && STARTS_WITH_CI(pszProfile, "NPJE")) ||
+            (pszProfile && STARTS_WITH_CI(pszProfile, "EPJE")))
         {
             // The JP2OPENJPEG driver uses 1024 block size by default. Set it
             // explicitly for NITFCreate() purposes.
@@ -5639,7 +5665,7 @@ static bool NITFPatchImageLength(const char *pszFilename, int nIMIndex,
 
             const char *pszProfile =
                 CSLFetchNameValueDef(papszCreationOptions, "PROFILE", "");
-            if (STARTS_WITH_CI(pszProfile, "NPJE"))
+            if (STARTS_WITH_CI(pszProfile, "NPJE") || STARTS_WITH_CI(pszProfile, "EPJE"))
             {
                 dfRate = std::max(0.1, std::min(99.9, dfRate));
 
@@ -7080,6 +7106,37 @@ void NITFDriver::InitCreationOptionList()
 
     if (bHasJPEG2000Drivers)
     {
+        if (bHasJP2OPENJPEG)
+        {
+            osCreationOptions +=
+        "   <Option name='PRECINCTS' type='string' description='Precincts "
+        "size "
+        "as a string of the form {w,h},{w,h},... with power-of-two "
+        "values'/>"
+        "   <Option name='REVERSIBLE' type='boolean' description='True if "
+        "the "
+        "compression is reversible' default='false'/>"
+        "   <Option name='RESOLUTIONS' type='int' description='Number of "
+        "resolutions.' min='1' max='30'/>"
+        "   <Option name='PROGRESSION' type='string-select' default='LRCP'>"
+        "       <Value>LRCP</Value>"
+        "       <Value>RLCP</Value>"
+        "       <Value>RPCL</Value>"
+        "       <Value>PCRL</Value>"
+        "       <Value>CPRL</Value>"
+        "   </Option>"
+        "   <Option name='YCC' type='boolean' description='if RGB must be "
+        "transformed to YCC color space (lossless MCT transform)' "
+        "default='YES'/>"
+        "   <Option name='PLT' type='boolean' description='True to insert "
+        "PLT "
+        "marker segments' default='false'/>"
+        "   <Option name='TLM' type='boolean' description='True to insert "
+        "TLM "
+        "marker segments' default='false'/>"
+        "   <Option name='BLOCKSIZE_STRICT' type='boolean' description='True to have "
+        "strict blocksize' />";
+        }
         osCreationOptions +=
             "   <Option name='TARGET' type='float' description='For JP2 only. "
             "Compression Percentage'/>"
@@ -7095,14 +7152,12 @@ void NITFDriver::InitCreationOptionList()
             osCreationOptions +=
                 "       <Value>BASELINE_1</Value>"
                 "       <Value>BASELINE_2</Value>"
+                "       <Value>EPJE</Value>"
                 "       <Value>NPJE</Value>"
                 "       <Value>NPJE_VISUALLY_LOSSLESS</Value>"
                 "       <Value>NPJE_NUMERICALLY_LOSSLESS</Value>";
         }
-        if (bHasJP2ECW)
-        {
-            osCreationOptions += "       <Value>EPJE</Value>";
-        }
+
         osCreationOptions +=
             "   </Option>"
             "   <Option name='JPEG2000_DRIVER' type='string-select' "
