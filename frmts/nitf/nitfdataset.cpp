@@ -2586,7 +2586,7 @@ void NITFDataset::InitializeNITFMetadata()
     if (psFile->pachHeader != nullptr)
     {
         if ((STARTS_WITH(psFile->pachHeader, "NITF02.10")) ||
-            (STARTS_WITH(psFile->pachHeader, "NSIF01.00")))
+            (STARTS_WITH(psFile->pachHeader, "NSIF01.00")) || (STARTS_WITH(psFile->pachHeader, "NSIF01.01")))
             nHeaderLenOffset = 354;
         else if ((STARTS_WITH(psFile->pachHeader, "NITF01.10")) ||
                  (STARTS_WITH(psFile->pachHeader, "NITF02.00")))
