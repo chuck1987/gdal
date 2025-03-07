@@ -190,7 +190,7 @@ retry_read_header:
                         "NITF_" #name);
 
     if (EQUAL(psFile->szVersion, "NITF02.10") ||
-        EQUAL(psFile->szVersion, "NSIF01.00"))
+        EQUAL(psFile->szVersion, "NSIF01.00") || EQUAL(psFile->szVersion, "NSIF01.01"))
     {
         char szWork[100];
 
